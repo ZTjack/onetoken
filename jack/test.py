@@ -723,10 +723,11 @@ class Strategy:
             return usdt[0]
 
     @property
-    def eos(self):
+    def dai(self):
         if self.position:
-            eos = [coin for coin in self.position if coin['contract'] == 'eos']
-            return eos[0]
+            dai = [coin for coin in self.position if coin['contract'] == 'dai']
+            # TODO
+            return dai[0]
 
     async def init(self):
         # 订阅Tick
@@ -764,7 +765,7 @@ class Strategy:
             'bid-d-ask': self.contract1_tick.bid1 / self.contract2_tick.ask1,
             'ask-d-bid': self.contract1_tick.ask1 / self.contract2_tick.bid1
         }
-        pos1 = self.eos['total_amount'] if self.eos else 0
+        pos1 = self.dai['total_amount'] if self.dai else 0
         core = math.pow(Config.diff, -pos1 / Config.amt) * Config.middle
 
         core_a = value['tk2-ask1'] * core
@@ -787,7 +788,7 @@ class Strategy:
         while True:
             # if self.contract1_tick:
             #     print(self.contract1_tick.ask1)
-            print('info！！！！！！！！！！！！！！！！！！！！！！', self.eos)
+            print('info！！！！！！！！！！！！！！！！！！！！！！', self.dai)
             value = {
                 'tk1-bid1': self.contract1_tick.bid1,
                 'tk1-ask1': self.contract1_tick.ask1,
@@ -800,7 +801,7 @@ class Strategy:
                 'ask-d-bid':
                 self.contract1_tick.ask1 / self.contract2_tick.bid1
             }
-            pos1 = self.eos['total_amount'] if self.eos else 0
+            pos1 = self.dai['total_amount'] if self.dai else 0
             print('dddddddddddd', pos1)
             time.sleep(2)
 
@@ -811,8 +812,8 @@ class Strategy:
 
 async def main():
     s = Strategy(name='test_strategy',
-                 acc_symbol='okex/mock-jack',
-                 contracts=['okex/btc.usdt', 'okex/eth.usdt'])
+                 acc_symbol='binance/mock-jacks',
+                 contracts=['binance/usdt.dai', 'binance/btc.usdt'])
     await s.init()
     s.check_signal()
 
