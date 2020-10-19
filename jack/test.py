@@ -22,6 +22,7 @@ import requests
 import asyncio
 from websocket import ABNF
 from urllib.parse import urlparse
+from operator import itemgetter
 
 
 class AccountWs:
@@ -582,15 +583,16 @@ class Strategy:
         self.active_orders = []  # pending orders
         self.info = {}  # 存放info信息
         self.contract1_setting = {}
-        self.contract2_setting = {}
+        self.withdrawingOrder = []
+        # self.contract2_setting = {}
 
     def on_tick_update(self, tk: Tick):
         delay = (arrow.now() - tk.time).total_seconds()
         if tk.bid1 and tk.ask1:
             if tk.bid1 >= tk.ask1:
                 print('bid1 >= ask1 %s %s', tk.bid1, tk.ask1)
-        if delay > 10:
-            print('tick delay comes', arrow.now(), 'tick come 1', delay, tk)
+        # if delay > 10:
+        #     print('tick delay comes', arrow.now(), 'tick come 1', delay, tk)
 
     @staticmethod
     def rounding(value, unit, func=round):  # copied from qbtrade.util
@@ -686,13 +688,31 @@ class Strategy:
             host='https://cdn.1tokentrade.cn/api/v1/basic/front/sub-markets')
         return r.json()
 
+    def cancel_order(self, exg_oid):
+        print('用exchange oid撤单', exg_oid)
+        if exg_oid in self.withdrawingOrder:
+            return
+        else:
+            self.withdrawingOrder.extend([exg_oid])
+
+        r = self.api_call('DELETE',
+                          '/{}/orders'.format(self.acc_symbol),
+                          params={'exchange_oid': exg_oid})
+        result = r.json()[0]
+        if 'exchange_oid' in result:
+            self.withdrawingOrder.remove(result['exchange_oid'])
+
+    def cancel_all(self):
+        r = self.api_call('DELETE', '/{}/orders/all'.format(self.acc_symbol))
+        print(r.json())
+
     @property
     def contract1(self):
         return self.contracts[0]
 
-    @property
-    def contract2(self):
-        return self.contracts[1]
+    # @property
+    # def contract2(self):
+    #     return self.contracts[1]
 
     @property
     def contract1_tick(self):
@@ -701,12 +721,12 @@ class Strategy:
         else:
             return None
 
-    @property
-    def contract2_tick(self):
-        if self.contract2 in self.ticks.data_queue:
-            return self.ticks.data_queue[self.contract2].get()
-        else:
-            return None
+    # @property
+    # def contract2_tick(self):
+    #     if self.contract2 in self.ticks.data_queue:
+    #         return self.ticks.data_queue[self.contract2].get()
+    #     else:
+    #         return None
 
     @property
     def position(self):
@@ -746,40 +766,27 @@ class Strategy:
         self.account.sub_order(self.on_order_update)
         self.contract1_setting = self.get_contract_config(
             self.contract1)['data'][0]['contracts'][0]
-        self.contract2_setting = self.get_contract_config(
-            self.contract2)['data'][0]['contracts'][0]
+        # self.contract2_setting = self.get_contract_config(
+        #     self.contract2)['data'][0]['contracts'][0]
 
         print('Account and Tick init success')
         # self.account.run()
 
         # time.sleep(20)
         # self.ticks.close()
+    def place_limit_order(self, amount, price, bs):
+        print('handle order', bs, amount, price)
+        if len(self.active_orders) > 5:
+            print('xxxxxxxxxxxxx', len(self.active_orders))
+            sorted_order = sorted(self.active_orders,
+                                  key=itemgetter('entrust_time'))
+            oldest_order = sorted_order[0]
+            self.cancel_order(oldest_order['exchange_oid'])
 
-    def main_callback(self):
-        value = {
-            'tk1-bid1': self.contract1_tick.bid1,
-            'tk1-ask1': self.contract1_tick.ask1,
-            'tk2-bid1': self.contract2_tick.bid1,
-            'tk2-ask1': self.contract2_tick.ask1,
-            'tk-diff': self.contract1_tick.middle / self.contract2_tick.middle,
-            'bid-d-ask': self.contract1_tick.bid1 / self.contract2_tick.ask1,
-            'ask-d-bid': self.contract1_tick.ask1 / self.contract2_tick.bid1
-        }
-        pos1 = self.dai['total_amount'] if self.dai else 0
-        core = math.pow(Config.diff, -pos1 / Config.amt) * Config.middle
-
-        core_a = value['tk2-ask1'] * core
-        core_b = value['tk2-bid1'] * core
-        # logging.info('c2: ',self.tk2.ask1/self.tk2.bid1)
-        # logging.info('core_a/core_b: ',core_a/core_b)
-        pb = core_b / math.sqrt(Config.earn) * Config.taker_return
-        ps = core_a * math.sqrt(Config.earn) / Config.taker_return
-        # logging.info('ps/pb:',ps,pb, ps/pb)
-        tb = pb * Config.taker_return
-        ts = ps / Config.taker_return
-        # min_change set here
-        tb = self.rounding(tb, self.contract1_setting.min_change, math.floor)
-        ts = self.rounding(ts, self.contract1_setting.min_change, math.ceil)
+        for order in self.active_orders:
+            if order['entrust_price'] == price:
+                return
+        self.place_order('binance/usdt.dai', price, bs, amount)
 
     def check_signal(self):
         # self.place_order('okex/eos.usdt', 2, 'b', 10)
@@ -788,21 +795,26 @@ class Strategy:
         while True:
             # if self.contract1_tick:
             #     print(self.contract1_tick.ask1)
-            print('info！！！！！！！！！！！！！！！！！！！！！！', self.dai)
-            value = {
-                'tk1-bid1': self.contract1_tick.bid1,
-                'tk1-ask1': self.contract1_tick.ask1,
-                'tk2-bid1': self.contract2_tick.bid1,
-                'tk2-ask1': self.contract2_tick.ask1,
-                'tk-diff':
-                self.contract1_tick.middle / self.contract2_tick.middle,
-                'bid-d-ask':
-                self.contract1_tick.bid1 / self.contract2_tick.ask1,
-                'ask-d-bid':
-                self.contract1_tick.ask1 / self.contract2_tick.bid1
-            }
-            pos1 = self.dai['total_amount'] if self.dai else 0
-            print('dddddddddddd', pos1)
+            # print('info！！！！！！！！！！！！！！！！！！！！！！', self.dai)
+            # value = {
+            #     'tk1-bid1': self.contract1_tick.bid1,
+            #     'tk1-ask1': self.contract1_tick.ask1,
+            #     'tk2-bid1': self.contract2_tick.bid1,
+            #     'tk2-ask1': self.contract2_tick.ask1,
+            #     'tk-diff':
+            #     self.contract1_tick.middle / self.contract2_tick.middle,
+            #     'bid-d-ask':
+            #     self.contract1_tick.bid1 / self.contract2_tick.ask1,
+            #     'ask-d-bid':
+            #     self.contract1_tick.ask1 / self.contract2_tick.bid1
+            # }
+            # pos1 = self.dai['total_amount'] if self.dai else 0
+            # print('dddddddddddd', pos1)
+
+            if self.contract1_tick.bid1 < 0.9912:
+                self.place_limit_order(100, self.contract1_tick.bid1, 'b')
+            if self.contract1_tick.ask1 > 0.9917:
+                self.place_limit_order(100, self.contract1_tick.ask1, 's')
             time.sleep(2)
 
     def printSth(self):
@@ -813,7 +825,7 @@ class Strategy:
 async def main():
     s = Strategy(name='test_strategy',
                  acc_symbol='binance/mock-jacks',
-                 contracts=['binance/usdt.dai', 'binance/btc.usdt'])
+                 contracts=['binance/usdt.dai'])
     await s.init()
     s.check_signal()
 
