@@ -8,7 +8,6 @@ Description:
 import _thread as thread
 import json
 import logging
-import math
 from collections import defaultdict
 
 import arrow
@@ -19,6 +18,7 @@ import hmac
 import time
 import websocket
 import requests
+import threading
 import asyncio
 from websocket import ABNF
 from urllib.parse import urlparse
@@ -113,8 +113,8 @@ class AccountWs:
                 else:
                     ping = time.time()
                     self.send_json({'uri': 'ping', 'uuid': ping})
-            except:
-                logging.exception('unexpected failed')
+            except Exception as e:
+                logging.exception(e)
             time.sleep(10)
 
     def on_data(self, msg, msg_type, *args):
@@ -144,8 +144,8 @@ class AccountWs:
                     print(data['uri'], data['code'])
                 else:
                     print('unhandled', data)
-        except:
-            logging.exception('unexpected failed')
+        except Exception as e:
+            logging.exception(e)
 
     def on_open(self):
         self.pong = time.time()
@@ -162,7 +162,7 @@ class AccountWs:
         logging.exception(error)
 
     @staticmethod
-    def on_close(*args):
+    def on_close(self, *args):
         """
         websocket 关闭的回调
         :return: None
@@ -342,7 +342,7 @@ class Quote:
                         if not self.queue_handlers[q_key]:
                             self.handle_q(q_key)
             except Exception as e:
-                print('subscribe {} failed...'.format(kwargs))
+                print('subscribe quote failed', str(e))
             else:
                 if on_update:
                     self.queue_handlers[q_key].append(on_update)
@@ -353,14 +353,14 @@ class Quote:
                 q = self.data_queue[q_key]
                 try:
                     tk = q.get()
-                except:
-                    print('get data from queue failed')
+                except Exception as e:
+                    print('get data from queue failed', str(e))
                     continue
                 for callback in self.queue_handlers[q_key]:
                     try:
                         callback(tk)
-                    except:
-                        logging.exception('quote callback fail')
+                    except Exception as e:
+                        logging.exception(e)
 
         thread.start_new_thread(run, ())
 
@@ -587,12 +587,13 @@ class Strategy:
         # self.contract2_setting = {}
 
     def on_tick_update(self, tk: Tick):
-        delay = (arrow.now() - tk.time).total_seconds()
+        # print('new Tick come', tk)
+        # delay = (arrow.now() - tk.time).total_seconds()
         if tk.bid1 and tk.ask1:
             if tk.bid1 >= tk.ask1:
                 print('bid1 >= ask1 %s %s', tk.bid1, tk.ask1)
         # if delay > 10:
-        #     print('tick delay comes', arrow.now(), 'tick come 1', delay, tk)
+        # print('tick delay second', delay)
 
     @staticmethod
     def rounding(value, unit, func=round):  # copied from qbtrade.util
@@ -605,8 +606,17 @@ class Strategy:
         self.info = data
 
     def on_order_update(self, data):
-        # print('get new order here', self.active_orders)
-        self.active_orders.append(data)
+        # print('get new order here', data)
+        status = None
+        if 'status' in data:
+            status = data['status']
+        if status == 'pending':
+            self.active_orders.append(data)
+        elif status == 'withdrawn':
+            self.active_orders[:] = [
+                order for order in self.active_orders
+                if order['exchange_oid'] != data['exchange_oid']
+            ]
 
     def gen_nonce(self):
         return str(int(time.time() * 1000000))
@@ -664,6 +674,7 @@ class Strategy:
         bs,
         amount,
     ):
+        print('place order', bs, amount, price)
         r = self.api_call('POST',
                           '/{}/orders'.format(self.acc_symbol),
                           data={
@@ -673,8 +684,9 @@ class Strategy:
                               'amount': amount
                           })
 
-        exg_oid = r.json()['exchange_oid']
-        print('exg_oid', exg_oid)
+        result = r.json()
+        if 'exchange_oid' in result:
+            print('place order success', result['exchange_oid'])
 
     def get_contract_config(self, contract):
         [exchange, ticker] = contract.split('/')
@@ -689,7 +701,7 @@ class Strategy:
         return r.json()
 
     def cancel_order(self, exg_oid):
-        print('用exchange oid撤单', exg_oid)
+        print('撤单', exg_oid)
         if exg_oid in self.withdrawingOrder:
             return
         else:
@@ -700,19 +712,19 @@ class Strategy:
                           params={'exchange_oid': exg_oid})
         result = r.json()[0]
         if 'exchange_oid' in result:
+            print('撤单成功', result['exchange_oid'])
             self.withdrawingOrder.remove(result['exchange_oid'])
 
     def cancel_all(self):
         r = self.api_call('DELETE', '/{}/orders/all'.format(self.acc_symbol))
         print(r.json())
 
+    def get_time(self):
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
     @property
     def contract1(self):
         return self.contracts[0]
-
-    # @property
-    # def contract2(self):
-    #     return self.contracts[1]
 
     @property
     def contract1_tick(self):
@@ -720,13 +732,6 @@ class Strategy:
             return self.ticks.data_queue[self.contract1].get()
         else:
             return None
-
-    # @property
-    # def contract2_tick(self):
-    #     if self.contract2 in self.ticks.data_queue:
-    #         return self.ticks.data_queue[self.contract2].get()
-    #     else:
-    #         return None
 
     @property
     def position(self):
@@ -746,7 +751,6 @@ class Strategy:
     def dai(self):
         if self.position:
             dai = [coin for coin in self.position if coin['contract'] == 'dai']
-            # TODO
             return dai[0]
 
     async def init(self):
@@ -766,56 +770,31 @@ class Strategy:
         self.account.sub_order(self.on_order_update)
         self.contract1_setting = self.get_contract_config(
             self.contract1)['data'][0]['contracts'][0]
-        # self.contract2_setting = self.get_contract_config(
-        #     self.contract2)['data'][0]['contracts'][0]
 
-        print('Account and Tick init success')
-        # self.account.run()
-
-        # time.sleep(20)
-        # self.ticks.close()
     def place_limit_order(self, amount, price, bs):
-        print('handle order', bs, amount, price)
-        if len(self.active_orders) > 5:
-            print('xxxxxxxxxxxxx', len(self.active_orders))
+        if len(self.active_orders) > 2:
             sorted_order = sorted(self.active_orders,
                                   key=itemgetter('entrust_time'))
             oldest_order = sorted_order[0]
             self.cancel_order(oldest_order['exchange_oid'])
 
         for order in self.active_orders:
-            if order['entrust_price'] == price:
+            if order['entrust_price'] == price and order['bs'] == bs:
+                print('已有相同价格挂单', price, bs)
                 return
         self.place_order('binance/usdt.dai', price, bs, amount)
 
     def check_signal(self):
-        # self.place_order('okex/eos.usdt', 2, 'b', 10)
-        # self.get_contract_config(self.contract1)
-
         while True:
-            # if self.contract1_tick:
-            #     print(self.contract1_tick.ask1)
-            # print('info！！！！！！！！！！！！！！！！！！！！！！', self.dai)
-            # value = {
-            #     'tk1-bid1': self.contract1_tick.bid1,
-            #     'tk1-ask1': self.contract1_tick.ask1,
-            #     'tk2-bid1': self.contract2_tick.bid1,
-            #     'tk2-ask1': self.contract2_tick.ask1,
-            #     'tk-diff':
-            #     self.contract1_tick.middle / self.contract2_tick.middle,
-            #     'bid-d-ask':
-            #     self.contract1_tick.bid1 / self.contract2_tick.ask1,
-            #     'ask-d-bid':
-            #     self.contract1_tick.ask1 / self.contract2_tick.bid1
-            # }
-            # pos1 = self.dai['total_amount'] if self.dai else 0
-            # print('dddddddddddd', pos1)
-
+            print('%s :Start Loop Tick' % (self.get_time()))
             if self.contract1_tick.bid1 < 0.9912:
+                print('start handle buy')
                 self.place_limit_order(100, self.contract1_tick.bid1, 'b')
-            if self.contract1_tick.ask1 > 0.9917:
+            if self.contract1_tick.ask1 > 0.99:
+                print('start handle sell')
                 self.place_limit_order(100, self.contract1_tick.ask1, 's')
             time.sleep(2)
+            print('%s :End Loop Tick' % (self.get_time()))
 
     def printSth(self):
         # get contract1 tick data
@@ -827,6 +806,7 @@ async def main():
                  acc_symbol='binance/mock-jacks',
                  contracts=['binance/usdt.dai'])
     await s.init()
+    print('Account and Tick init success')
     s.check_signal()
 
 
