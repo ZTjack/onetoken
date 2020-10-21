@@ -23,6 +23,7 @@ import asyncio
 from websocket import ABNF
 from urllib.parse import urlparse
 from operator import itemgetter
+import qbtrade as qb
 
 
 class AccountWs:
@@ -602,7 +603,6 @@ class Strategy:
         return float(fmt.format(res))
 
     def on_info_update(self, data):
-        # print('get new info here', self.info)
         self.info = data
 
     def on_order_update(self, data):
@@ -753,7 +753,7 @@ class Strategy:
             dai = [coin for coin in self.position if coin['contract'] == 'dai']
             return dai[0]
 
-    async def init(self):
+    def init(self):
         # 订阅Tick
         self.ticks = TickV3Quote()
         self.ticks.run()
@@ -772,7 +772,7 @@ class Strategy:
             self.contract1)['data'][0]['contracts'][0]
 
     def place_limit_order(self, amount, price, bs):
-        if len(self.active_orders) > 2:
+        if len(self.active_orders) > 5:
             sorted_order = sorted(self.active_orders,
                                   key=itemgetter('entrust_time'))
             oldest_order = sorted_order[0]
@@ -787,30 +787,39 @@ class Strategy:
     def check_signal(self):
         while True:
             print('%s :Start Loop Tick' % (self.get_time()))
-            if self.contract1_tick.bid1 < 0.9912:
+            tick = self.contract1_tick
+            if self.contract1_tick.bid1 < 0.988:
                 print('start handle buy')
-                self.place_limit_order(100, self.contract1_tick.bid1, 'b')
+                self.place_limit_order(100, tick.bid1, 'b')
             if self.contract1_tick.ask1 > 0.99:
                 print('start handle sell')
-                self.place_limit_order(100, self.contract1_tick.ask1, 's')
+                self.place_limit_order(100, tick.ask1, 's')
             time.sleep(2)
-            print('%s :End Loop Tick' % (self.get_time()))
 
     def printSth(self):
         # get contract1 tick data
         print(self.ticks.data_queue[self.contracts[0]].get().ask1)
 
+    def test(self):
+        while True:
+            print('dddddd')
+            time.sleep(2)
 
-async def main():
+
+def main():
+    print("start", arrow.now())
     s = Strategy(name='test_strategy',
                  acc_symbol='binance/mock-jacks',
                  contracts=['binance/usdt.dai'])
-    await s.init()
+    s.init()
     print('Account and Tick init success')
+    time.sleep(5)
     s.check_signal()
+    # qb.fut(qb.autil.loop_call(s.check_signal, 2))
+    # s.check_signal()
 
 
 if __name__ == '__main__':
-    asyncio.ensure_future(main())
-    asyncio.get_event_loop().run_forever()
-    # main()
+    # asyncio.ensure_future(main())
+    # asyncio.get_event_loop().run_forever()
+    main()
