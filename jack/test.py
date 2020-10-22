@@ -9,21 +9,21 @@ import _thread as thread
 import json
 import logging
 from collections import defaultdict
-
 import arrow
 import hashlib
 import gzip
+import os
 import queue
 import hmac
 import time
 import websocket
 import requests
 import threading
-import asyncio
+# import asyncio
 from websocket import ABNF
 from urllib.parse import urlparse
 from operator import itemgetter
-import qbtrade as qb
+# import qbtrade as qb
 
 
 class AccountWs:
@@ -553,10 +553,10 @@ class Tick:
             return (self.bid1 + self.ask1) / 2
 
     def __str__(self):
-        return '<{} {}.{:03d} {}/{} {} {}>'.format(
+        return '<{} {}.{:03d} {}/{} {} {} {}>'.format(
             self.contract, self.time.strftime('%H:%M:%S'),
             self.time.microsecond // 1000, self.bid1, self.ask1, self.last,
-            self.volume)
+            self.amount, self.volume)
 
     def __repr__(self):
         return str(self)
@@ -701,12 +701,11 @@ class Strategy:
         return r.json()
 
     def cancel_order(self, exg_oid):
-        print('撤单', exg_oid)
         if exg_oid in self.withdrawingOrder:
             return
         else:
             self.withdrawingOrder.extend([exg_oid])
-
+        print('撤单', exg_oid)
         r = self.api_call('DELETE',
                           '/{}/orders'.format(self.acc_symbol),
                           params={'exchange_oid': exg_oid})
@@ -784,25 +783,26 @@ class Strategy:
                 return
         self.place_order('binance/usdt.dai', price, bs, amount)
 
+    def check_balance(self):
+        while True:
+            if 'balance' in self.info:
+                if self.info['balance'] < 10000:
+                    print('到达最大亏损了，退出程序')
+                    os._exit(1)
+            time.sleep(3)
+
     def check_signal(self):
         while True:
-            print('%s :Start Loop Tick' % (self.get_time()))
+            print('%s: Start Loop Tick' % (self.get_time()))
             tick = self.contract1_tick
-            if self.contract1_tick.bid1 < 0.988:
-                print('start handle buy')
-                self.place_limit_order(100, tick.bid1, 'b')
-            if self.contract1_tick.ask1 > 0.99:
-                print('start handle sell')
-                self.place_limit_order(100, tick.ask1, 's')
-            time.sleep(2)
+            # 限定最大下单量
+            volume = min(tick.volume, 100)
+            if volume:
+                if tick.bid1 < 0.988:
+                    self.place_limit_order(volume, tick.bid1, 'b')
+                if tick.ask1 > 0.99:
+                    self.place_limit_order(volume, tick.ask1, 's')
 
-    def printSth(self):
-        # get contract1 tick data
-        print(self.ticks.data_queue[self.contracts[0]].get().ask1)
-
-    def test(self):
-        while True:
-            print('dddddd')
             time.sleep(2)
 
 
@@ -813,10 +813,9 @@ def main():
                  contracts=['binance/usdt.dai'])
     s.init()
     print('Account and Tick init success')
-    time.sleep(5)
+    # time.sleep(5)
+    threading.Thread(target=s.check_balance).start()
     s.check_signal()
-    # qb.fut(qb.autil.loop_call(s.check_signal, 2))
-    # s.check_signal()
 
 
 if __name__ == '__main__':
