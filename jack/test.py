@@ -687,6 +687,11 @@ class Strategy:
         result = r.json()
         if 'exchange_oid' in result:
             print('place order success', result['exchange_oid'])
+            # print('cancel order automatically after 10s')
+            # t = threading.Timer(5,
+            #                     self.cancel_order,
+            #                     args=[result['exchange_oid']])
+            # t.start()
 
     def get_contract_config(self, contract):
         [exchange, ticker] = contract.split('/')
@@ -802,8 +807,10 @@ class Strategy:
                     self.place_limit_order(volume, tick.bid1, 'b')
                 if tick.ask1 > 0.99:
                     self.place_limit_order(volume, tick.ask1, 's')
-
             time.sleep(2)
+
+    def test(self, a, b):
+        print('xxxxxxxx', a + b)
 
 
 def main():
@@ -812,8 +819,8 @@ def main():
                  acc_symbol='binance/mock-jacks',
                  contracts=['binance/usdt.dai'])
     s.init()
-    print('Account and Tick init success')
     # time.sleep(5)
+    # 持仓风控
     threading.Thread(target=s.check_balance).start()
     s.check_signal()
 
