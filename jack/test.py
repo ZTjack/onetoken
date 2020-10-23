@@ -794,7 +794,7 @@ class Strategy:
                 if self.info['balance'] < 10000:
                     print('到达最大亏损了，退出程序')
                     os._exit(1)
-            time.sleep(3)
+            time.sleep(10)
 
     def check_signal(self):
         while True:
