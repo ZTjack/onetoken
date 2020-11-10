@@ -3,10 +3,11 @@ Author: Jack
 Date: 2020-09-18 14:29:34
 LastEditors: Jack
 LastEditTime: 2020-09-18 14:34:20
-Description: 
+Description:
 """
 import _thread as thread
 import json
+import math
 import logging
 from collections import defaultdict
 import arrow
@@ -568,12 +569,15 @@ class Tick:
 class Config:
     api_key = 'QCsKNH71-n8AqFBer-ZUdnRnKA-y1jsbYhU'
     api_secret = 's53cGW3W-sdEXvOSA-i8JX9oAz-16mMA4sb'
-    diff: 1.0020047000551107
-    amt: 120
-    middle: 1.0107152462366127
-    earn: 1.001
-    taker_return: 0.99975
-    maker_return: 1.00003
+    diff = 1.0020047000551107
+    amt = 120
+    middle = 1.0107152462366127
+    earn = 1.001
+    taker_return = 0.99975
+    maker_return = 1.00003
+    place_amt = 4
+    max_pending_orders = 5
+    trade_interval = 0.4
 
 
 class Strategy:
@@ -587,8 +591,9 @@ class Strategy:
         self.active_orders = []  # pending orders
         self.info = {}  # 存放info信息
         self.contract1_setting = {}
+        self.contract2_setting = {}
         self.withdrawingOrder = []
-        # self.contract2_setting = {}
+        self.last_trade_time = 0
 
     def on_tick_update(self, tk: Tick):
         # print('new Tick come', tk)
@@ -613,6 +618,8 @@ class Strategy:
         status = None
         if 'status' in data:
             status = data['status']
+        if status == 'dealt':
+            self.place_hedge_order(data)
         if status == 'pending':
             self.active_orders.append(data)
         elif status == 'withdrawn':
@@ -702,6 +709,13 @@ class Strategy:
             #                     args=[result['exchange_oid']])
             # t.start()
 
+    def place_hedge_order(self, order):
+        average_dealt_price = order['average_dealt_price']
+        dealt_amount = order['dealt_amount']
+        bs = 'b' if order.bs == 's' else 's'
+        print('下对冲单')
+        self.place_order(self.contract2, average_dealt_price, bs, dealt_amount)
+
     def get_contract_config(self, contract):
         [exchange, ticker] = contract.split('/')
         r = self.api_call(
@@ -740,9 +754,20 @@ class Strategy:
         return self.contracts[0]
 
     @property
+    def contract2(self):
+        return self.contracts[1]
+
+    @property
     def contract1_tick(self):
         if self.contract1 in self.ticks.data_queue:
             return self.ticks.data_queue[self.contract1].get()
+        else:
+            return None
+
+    @property
+    def contract2_tick(self):
+        if self.contract1 in self.ticks.data_queue:
+            return self.ticks.data_queue[self.contract2].get()
         else:
             return None
 
@@ -753,18 +778,28 @@ class Strategy:
         return None
 
     @property
-    def usdt(self):
-        if self.position:
+    def pos1(self):
+        if self.position and self.contract1:
+            ticker = self.contract1.split('/')[1]
             usdt = [
-                coin for coin in self.position if coin['contract'] == 'usdt'
+                coin for coin in self.position if coin['contract'] == ticker
             ]
-            return usdt[0]
+            if len(usdt):
+                return usdt[0]['total_amount']
+            else:
+                return 0
 
     @property
-    def dai(self):
-        if self.position:
-            dai = [coin for coin in self.position if coin['contract'] == 'dai']
-            return dai[0]
+    def contract1_min_change(self):
+        if 'min_change' in self.contract1_setting:
+            return self.contract1_setting['min_change']
+        return None
+
+    @property
+    def contract2_min_change(self):
+        if 'min_change' in self.contract2_setting:
+            return self.contract1_setting['min_change']
+        return None
 
     def init(self):
         # 订阅Tick
@@ -783,9 +818,11 @@ class Strategy:
         self.account.sub_order(self.on_order_update)
         self.contract1_setting = self.get_contract_config(
             self.contract1)['data'][0]['contracts'][0]
+        self.contract2_setting = self.get_contract_config(
+            self.contract2)['data'][0]['contracts'][0]
 
     def place_limit_order(self, amount, price, bs):
-        if len(self.active_orders) > 5:
+        if len(self.active_orders) > Config.max_pending_orders:
             sorted_order = sorted(self.active_orders,
                                   key=itemgetter('entrust_time'))
             oldest_order = sorted_order[0]
@@ -794,9 +831,14 @@ class Strategy:
         for order in self.active_orders:
             if order['entrust_price'] == price and order['bs'] == bs:
                 print('已有相同价格挂单', price, bs)
-                print('dddddddddddd', self.active_orders)
                 return
-        self.place_order('binance/usdt.dai', price, bs, amount)
+        now = arrow.now().float_timestamp
+        if now - self.last_trade_time < Config.trade_interval:
+            print('下单间隔太短')
+            return
+        else:
+            self.last_trade_time = now
+            self.place_order(self.contract1, price, bs, amount)
 
     def check_balance(self):
         while True:
@@ -809,15 +851,50 @@ class Strategy:
     def check_signal(self):
         while True:
             print('%s: Start Loop Tick' % (self.get_time()))
-            tick = self.contract1_tick
-            # 限定最大下单量
-            volume = min(tick.volume, 100)
-            if volume:
-                if tick.bid1 < 0.988:
-                    self.place_limit_order(volume, tick.bid1, 'b')
-                if tick.ask1 > 0.99:
-                    self.place_limit_order(volume, tick.ask1, 's')
+            contract1_tick = self.contract1_tick
+            contract2_tick = self.contract2_tick
+            pos1 = self.pos1
+            contract1_min_change = self.contract1_min_change
+            core = math.pow(Config.diff, -pos1 / Config.amt) * Config.middle
+            core_a = contract2_tick.ask1 * core
+            core_b = contract2_tick.bid1 * core
+
+            pb = core_b / math.sqrt(Config.earn) * Config.taker_return
+            ps = core_a / math.sqrt(Config.earn) * Config.taker_return
+
+            tb = pb * Config.taker_return
+            ts = ps / Config.taker_return
+
+            tb = self.rounding(tb, contract1_min_change, math.floor)
+            ts = self.rounding(ts, contract1_min_change, math.ceil)
+
+            mb = pb * Config.maker_return
+            ms = ps / Config.maker_return
+            mb = self.rounding(mb, contract1_min_change, math.floor)
+            ms = self.rounding(ms, contract1_min_change, math.ceil)
+
+            if pos1 < Config.amt:
+                if tb >= contract1_tick.ask1:
+                    self.place_limit_order(Config.place_amt, tb, 'b')
+                else:
+                    mb = min(mb, contract1_tick.bid1)
+                    self.place_limit_order(Config.place_amt, mb, 'b')
+            if -Config.amt < pos1:
+                if ts <= contract1_tick.bid1:
+                    self.place_limit_order(Config.place_amt, ts, 's')
+                else:
+                    ms = max(ms, contract1_tick.ask1)
+                    self.place_limit_order(Config.place_amt, ms, 's')
             time.sleep(2)
+            # tb = self.rounding(tb, )
+            # 限定最大下单量
+            # volume = min(tick.volume, 100)
+            # if volume:
+            #     if tick.bid1 < 0.988:
+            #         self.place_limit_order(volume, tick.bid1, 'b')
+            #     if tick.ask1 > 0.99:
+            #         self.place_limit_order(volume, tick.ask1, 's')
+            # time.sleep(2)
 
     def test(self, a, b):
         print('xxxxxxxx', a + b)
@@ -830,8 +907,8 @@ class Strategy:
 
 def main():
     s = Strategy(name='test_strategy',
-                 acc_symbol='binance/mock-jacks',
-                 contracts=['binance/usdt.dai'])
+                 acc_symbol='okef/mock-jack',
+                 contracts=['okef/btc.usd.b', 'okef/btc.usd.q'])
     print("start", arrow.now())
     atexit.register(s.exit_handler)
     s.init()
