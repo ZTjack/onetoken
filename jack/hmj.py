@@ -127,8 +127,8 @@ class Timer(object):
 
 class Strategy:
     def __init__(self, stid: str):
-        self.acc_symbol = ''
-        self.cons = []
+        self.acc_symbol = 'okef/mock-jack'
+        self.cons = ['okef/btc.usd.2021-03-26', 'okef/btc.usd.2020-12-25']
         self.acc: qbxt.Account
 
         self.config = Config()
@@ -151,8 +151,8 @@ class Strategy:
         self.last_trade_time = 0
         self.inited = False
 
-        self.influxdbudp = util.InfluxdbUdpGauge(self.stid,
-                                                 measurement_prefix=True)
+        # self.influxdbudp = util.InfluxdbUdpGauge(self.stid,
+        #                                          measurement_prefix=True)
 
         # coid => Order
         self.active_orders: Dict[str, Order] = {}
@@ -220,12 +220,12 @@ class Strategy:
         # qb.qstatsd.gauge(key, value, tags=self.statsd_tags(tags if tags else {}), interval=interval)
 
     async def init(self):
-        self.config.set_key(f"strategy:{self.stid}:config")
-        await self.config.sync()
-        self.acc_symbol = self.config.acc
-        self.cons = [self.config.c1_symbol, self.config.c2_symbol]
+        # self.config.set_key(f"strategy:{self.stid}:config")
+        # await self.config.sync()
+        # self.acc_symbol = self.config.acc
+        # self.cons = [self.config.c1_symbol, self.config.c2_symbol]
 
-        logging.info(self.c1, self.c2)
+        # logging.info(self.c1, self.c2)
         self.quote1 = await qbxt.new_quote('okef',
                                            interest_cons=[self.c1],
                                            use_proxy=True,
@@ -834,8 +834,8 @@ class Strategy:
 
 
 async def main():
-    s = Strategy(stid=stid)
-    await s.run()
+    s = Strategy(stid='test')
+    await s.init()
 
 
 async def play():
@@ -849,18 +849,5 @@ async def play():
 
 
 if __name__ == '__main__':
-    qb.init(env='prod')
-    docopt = docoptinit(__doc__)
-    if docopt['--dry-run']:
-        dryrun = True
-    else:
-        dryrun = False
-    stid = str(docopt['--stid'])
-    logging.info(f'stid: {stid}')
-    logging.info(f'dryrun: {dryrun}')
-    timerInflux = util.InfluxdbUdpGauge(stid, measurement_prefix=True)
-    if docopt['--play']:
-        qb.fut(play())
-    else:
-        qb.fut(main())
+    qb.fut(main())
     qb.run_forever()

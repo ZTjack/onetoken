@@ -14,6 +14,7 @@ import logging
 import arrow
 import asyncio
 
+
 class Order:
     def __init__(self):
         self.eoid = None
@@ -29,7 +30,6 @@ class Order:
         self.opt = {}
         self.cancel_times = 0
         self.extra = None
-
 
 class Strategy:
     def __init__(self, stid: str):
