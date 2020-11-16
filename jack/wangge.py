@@ -620,6 +620,10 @@ class Strategy:
             status = data['status']
         if status == 'dealt':
             self.place_hedge_order(data)
+            self.active_orders[:] = [
+                order for order in self.active_orders
+                if order['exchange_oid'] != data['exchange_oid']
+            ]
         if status == 'pending':
             self.active_orders.append(data)
         elif status == 'withdrawn':
@@ -712,7 +716,7 @@ class Strategy:
     def place_hedge_order(self, order):
         average_dealt_price = order['average_dealt_price']
         dealt_amount = order['dealt_amount']
-        bs = 'b' if order.bs == 's' else 's'
+        bs = 'b' if order['bs'] == 's' else 's'
         print('下对冲单')
         self.place_order(self.contract2, average_dealt_price, bs, dealt_amount)
 
@@ -823,10 +827,12 @@ class Strategy:
 
     def place_limit_order(self, amount, price, bs):
         if len(self.active_orders) > Config.max_pending_orders:
+            print('挂单太多了', len(self.active_orders), Config.max_pending_orders)
             sorted_order = sorted(self.active_orders,
                                   key=itemgetter('entrust_time'))
             oldest_order = sorted_order[0]
             self.cancel_order(oldest_order['exchange_oid'])
+            return
 
         for order in self.active_orders:
             if order['entrust_price'] == price and order['bs'] == bs:
