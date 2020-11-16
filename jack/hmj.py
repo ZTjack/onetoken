@@ -21,7 +21,7 @@ import qbxt
 import yaml
 from docopt import docopt as docoptinit
 
-from tyz import util
+# from tyz import util
 
 
 class Extra:
