@@ -35,6 +35,7 @@ class Strategy:
         self.dealt_info: Dict[str, float] = {}
         self.bbo_update_q = asyncio.Queue(1)
         self.ticks: Dict[str, qbxt.model.OrderbookUpdate] = {}
+        self.con_basics: Dict[str, qb.Contract] = {}
 
     @property
     def c1(self):
