@@ -26,8 +26,8 @@ class Order:
 class Strategy:
     def __init__(self, stid: str):
         self.stid = stid
-        self.acc_symbol = 'okef/mock-jack'
-        self.cons = ['okef/btc.usd.2021-03-26', 'okef/btc.usd.2020-12-25']
+        self.acc_symbol = 'huobip/subdjw8'
+        self.cons = ['huobip/btc.usdt', 'huobip/bch.usdt']
         self.bbo: Dict[str, qbxt.model.BboUpdate] = {}
         self.asset_by_ws = {}
         self.pos_by_ws = {}
