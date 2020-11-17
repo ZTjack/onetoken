@@ -163,18 +163,18 @@ class Strategy:
         self.bbo_update_q.put_nowait('update_bbo')
 
     async def init(self):
-        self.quote1 = await qbxt.new_quote('okef',
+        self.quote1 = await qbxt.new_quote('huobip',
                                            interest_cons=[self.c1],
                                            use_proxy=True,
                                            bbo_callback=self.update_bbo)
-        self.quote2 = await qbxt.new_quote('okef',
+        self.quote2 = await qbxt.new_quote('huobip',
                                            interest_cons=[self.c2],
                                            use_proxy=True,
                                            orderbook_callback=self.update_tick)
         for con in self.cons:
             self.con_basics[con] = qb.con(con)
         await asyncio.sleep(1)
-        logging.info('quote okef init')
+        logging.info('quote huobip init')
 
         # cfg = json.loads(Path('~/.onetoken/okef.ot-mom-1-sub128.json').expanduser().read_text())
         logging.info(f'using account {self.acc_symbol}')
@@ -188,7 +188,7 @@ class Strategy:
             position_callback=self.position_callback,
             order_callback=self.order_callback)
         await asyncio.sleep(1)
-        logging.info('account okef init')
+        logging.info('account huobip init')
 
 
 async def main():
