@@ -21,7 +21,7 @@ import qbxt
 import yaml
 from docopt import docopt as docoptinit
 
-# from tyz import util
+from tyz import util
 
 
 class Extra:
@@ -127,8 +127,8 @@ class Timer(object):
 
 class Strategy:
     def __init__(self, stid: str):
-        self.acc_symbol = 'okef/mock-jack'
-        self.cons = ['okef/btc.usd.2021-03-26', 'okef/btc.usd.2020-12-25']
+        self.acc_symbol = ''
+        self.cons = []
         self.acc: qbxt.Account
 
         self.config = Config()
@@ -151,8 +151,7 @@ class Strategy:
         self.last_trade_time = 0
         self.inited = False
 
-        # self.influxdbudp = util.InfluxdbUdpGauge(self.stid,
-        #                                          measurement_prefix=True)
+        self.influxdbudp = util.InfluxdbUdpGauge(self.stid, measurement_prefix=True)
 
         # coid => Order
         self.active_orders: Dict[str, Order] = {}
@@ -220,18 +219,16 @@ class Strategy:
         # qb.qstatsd.gauge(key, value, tags=self.statsd_tags(tags if tags else {}), interval=interval)
 
     async def init(self):
-        # self.config.set_key(f"strategy:{self.stid}:config")
-        # await self.config.sync()
-        # self.acc_symbol = self.config.acc
-        # self.cons = [self.config.c1_symbol, self.config.c2_symbol]
+        self.config.set_key(f"strategy:{self.stid}:config")
+        await self.config.sync()
+        self.acc_symbol = self.config.acc
+        self.cons = [self.config.c1_symbol, self.config.c2_symbol]
 
-        # logging.info(self.c1, self.c2)
-        self.quote1 = await qbxt.new_quote('okef',
-                                           interest_cons=[self.c1],
+        logging.info(self.c1, self.c2)
+        self.quote1 = await qbxt.new_quote('okef', interest_cons=[self.c1],
                                            use_proxy=True,
                                            bbo_callback=self.update_bbo)
-        self.quote2 = await qbxt.new_quote('okef',
-                                           interest_cons=[self.c2],
+        self.quote2 = await qbxt.new_quote('okef', interest_cons=[self.c2],
                                            use_proxy=True,
                                            orderbook_callback=self.update_tick)
         for con in self.cons:
@@ -241,15 +238,14 @@ class Strategy:
 
         # cfg = json.loads(Path('~/.onetoken/okef.ot-mom-1-sub128.json').expanduser().read_text())
         logging.info(f'using account {self.acc_symbol}')
-        self.acc = await qbxt.new_account(
-            self.acc_symbol,
-            # config=cfg,
-            use_1token_auth=True,
-            use_proxy=True,
-            interest_cons=[self.c1, self.c2],
-            asset_callback=self.asset_callback,
-            position_callback=self.position_callback,
-            order_callback=self.order_callback)
+        self.acc = await qbxt.new_account(self.acc_symbol,
+                                          # config=cfg,
+                                          use_1token_auth=True,
+                                          use_proxy=True,
+                                          interest_cons=[self.c1, self.c2],
+                                          asset_callback=self.asset_callback,
+                                          position_callback=self.position_callback,
+                                          order_callback=self.order_callback)
         await asyncio.sleep(1)
         logging.info('account okef init')
 
@@ -345,8 +341,7 @@ class Strategy:
                     continue
 
     def new_coid(self, con, bs):
-        return con + '-' + f'{bs}ooooo' + ''.join(
-            random.choices(string.ascii_letters, k=10))
+        return con + '-' + f'{bs}ooooo' + ''.join(random.choices(string.ascii_letters, k=10))
 
     async def main_callback(self):
         if not self.inited:
@@ -361,8 +356,7 @@ class Strategy:
             'ask-d-bid': self.tk1.ask1 / self.tk2.bid1
         }
         self.gauge('quote', value)
-        core = math.pow(self.config.diff,
-                        -self.pos1 / self.config.amt) * self.config.middle
+        core = math.pow(self.config.diff, -self.pos1 / self.config.amt) * self.config.middle
 
         core_a = self.tk2.ask1 * core
         core_b = self.tk2.bid1 * core
@@ -386,14 +380,8 @@ class Strategy:
         # logging.info('after rouding', mb,ms, ms/mb)
 
         self.gauge('core', core)
-        self.gauge('diff-ideal-b', {
-            'maker': mb / self.tk2.bid1,
-            'taker': tb / self.tk2.bid1
-        })
-        self.gauge('diff-ideal-s', {
-            'maker': ms / self.tk2.ask1,
-            'taker': ts / self.tk2.ask1
-        })
+        self.gauge('diff-ideal-b', {'maker': mb / self.tk2.bid1, 'taker': tb / self.tk2.bid1})
+        self.gauge('diff-ideal-s', {'maker': ms / self.tk2.ask1, 'taker': ts / self.tk2.ask1})
         # pass
         if dryrun:
             return
@@ -403,18 +391,14 @@ class Strategy:
                 qb.fut(self.do_action('b', tb, self.config.place_amt, False))
             else:
                 mb = min(mb, self.tk1.bid1)
-                qb.fut(
-                    self.do_action('b', mb, self.config.place_amt,
-                                   self.config.force_maker))
+                qb.fut(self.do_action('b', mb, self.config.place_amt, self.config.force_maker))
         if -self.config.amt < self.pos1:
             if ts <= self.tk1.bid1:
                 # logging.info(f'try to place taker s {ts}')
                 qb.fut(self.do_action('s', ts, self.config.place_amt, False))
             else:
                 ms = max(ms, self.tk1.ask1)
-                qb.fut(
-                    self.do_action('s', ms, self.config.place_amt,
-                                   self.config.force_maker))
+                qb.fut(self.do_action('s', ms, self.config.place_amt, self.config.force_maker))
         return
 
     def handle_remain_orders(self, bs, price):
@@ -436,10 +420,8 @@ class Strategy:
                         qb.fut(self.cancel_order(coid=o.coid))
                     self.active_orders[coid].last_cancel_time = now
                     self.active_orders[coid].cancel_times += 1
-                    if self.active_orders[
-                            coid].cancel_times > self.config.max_cancel_times:
-                        logging.warning(
-                            f'{o.coid} {o.eoid} cancel times exceed limit')
+                    if self.active_orders[coid].cancel_times > self.config.max_cancel_times:
+                        logging.warning(f'{o.coid} {o.eoid} cancel times exceed limit')
                         self.active_orders.pop(o.coid, None)
 
         return ideal_order_in_active
@@ -452,10 +434,7 @@ class Strategy:
             with Timer('cancel-order-coid'):
                 res, err = await self.acc.cancel_order(client_oid=coid)
         if err:
-            if err.code not in [
-                    'exg-okef-32004',
-                    qbxt.model.Error.EXG_CANCEL_ORDER_NOT_FOUND
-            ]:
+            if err.code not in ['exg-okef-32004', qbxt.model.Error.EXG_CANCEL_ORDER_NOT_FOUND]:
                 logging.warning(res, err, eoid, coid)
             #     if eoid:
             #         qb.fut(self.cancel_order_after_sleep(eoid=eoid, sleep=10))
@@ -465,12 +444,8 @@ class Strategy:
     async def place_maker_order(self, o: Order):
         action = f'place-maker-order-{o.bs}'
         with Timer(action):
-            res, err = await self.acc.place_order(self.c1,
-                                                  price=o.entrust_price,
-                                                  bs=o.bs,
-                                                  amount=o.entrust_amount,
-                                                  client_oid=o.coid,
-                                                  options=o.opt)
+            res, err = await self.acc.place_order(self.c1, price=o.entrust_price, bs=o.bs, amount=o.entrust_amount,
+                                                  client_oid=o.coid, options=o.opt)
         if err:
             # 也有可能下单成功
             # del self.active_orders[o.coid]
@@ -479,8 +454,7 @@ class Strategy:
         if o.coid in self.active_orders.keys():
             self.active_orders[o.coid].eoid = res.exchange_oid
 
-    async def do_action(self, bs: str, price: float, amt: float,
-                        force_maker: bool):
+    async def do_action(self, bs: str, price: float, amt: float, force_maker: bool):
         ideal_order_in_active = self.handle_remain_orders(bs, price)
         if ideal_order_in_active:
             return
@@ -524,22 +498,16 @@ class Strategy:
 
     def gauge_order_extra(self, o: Order):
         field = {
-            'tk1-bid1-place': o.extra.tk1_bbo_place.bid1,
-            'tk1-ask1-place': o.extra.tk1_bbo_place.ask1,
-            'tk2-bid1-place': o.extra.tk2_bbo_place.bid1,
-            'tk2-ask1-place': o.extra.tk2_bbo_place.ask1,
-            'tk1-bid1-dealt': self.tk1.bid1,
-            'tk1-ask1-dealt': self.tk1.ask1,
-            'tk2-bid1-dealt': self.tk2.bid1,
-            'tk2-ask1-dealt': self.tk2.ask1,
+            'tk1-bid1-place': o.extra.tk1_bbo_place.bid1, 'tk1-ask1-place': o.extra.tk1_bbo_place.ask1,
+            'tk2-bid1-place': o.extra.tk2_bbo_place.bid1, 'tk2-ask1-place': o.extra.tk2_bbo_place.ask1,
+            'tk1-bid1-dealt': self.tk1.bid1, 'tk1-ask1-dealt': self.tk1.ask1,
+            'tk2-bid1-dealt': self.tk2.bid1, 'tk2-ask1-dealt': self.tk2.ask1,
         }
         if o.bs == 'b':
-            field[
-                'diff-b-place'] = o.entrust_price / o.extra.tk2_bbo_place.bid1,
+            field['diff-b-place'] = o.entrust_price / o.extra.tk2_bbo_place.bid1,
             field['diff-b-dealt'] = o.entrust_price / self.tk2.bid1
         elif o.bs == 's':
-            field[
-                'diff-s-place'] = o.entrust_price / o.extra.tk2_bbo_place.ask1
+            field['diff-s-place'] = o.entrust_price / o.extra.tk2_bbo_place.ask1
             field['diff-s-dealt'] = o.entrust_price / self.tk2.ask1
 
         if o.first_cancel_time:
@@ -552,9 +520,7 @@ class Strategy:
             # 如果不在程序肯定有问题
             order_in_memory = self.active_orders.get(order.client_oid, None)
             if not order_in_memory:
-                logging.warning(
-                    f'{order.client_oid}, {order.exchange_oid} not in active orders'
-                )
+                logging.warning(f'{order.client_oid}, {order.exchange_oid} not in active orders')
                 return
             now = arrow.now().float_timestamp
             elapse = now - order_in_memory.entrust_time
@@ -568,9 +534,7 @@ class Strategy:
             # 如果不在程序肯定有问题
             order_in_memory = self.active_orders.get(order.client_oid, None)
             if not order_in_memory:
-                logging.warning(
-                    f'{order.client_oid}, {order.exchange_oid} not in active orders'
-                )
+                logging.warning(f'{order.client_oid}, {order.exchange_oid} not in active orders')
                 return
             amt = order.dealt_amount - order_in_memory.dealt_amt
             self.active_orders[order.client_oid].dealt_amt = order.dealt_amount
@@ -580,60 +544,46 @@ class Strategy:
 
             if amt > 0:
                 bs = 'b' if order.bs == 's' else 's'
-                qb.fut(
-                    self.place_hedge_order(bs, amt, order.average_dealt_price))
+                qb.fut(self.place_hedge_order(bs, amt, order.average_dealt_price))
 
                 # c2_price = self.tk2.bid1 if order.bs == 'b' else self.tk2.ask1
-                self.gauge('place-price',
-                           order.entrust_price, {'bs': order.bs},
+                self.gauge('place-price', order.entrust_price, {'bs': order.bs},
                            ts=order_in_memory.entrust_time)
                 self.gauge('dealt-amt', amt, tags={'bs': order.bs})
                 self.gauge_order_extra(self.active_orders[order.client_oid])
         if order.status == qbxt.model.Order.DEALT and order.contract == self.c2:
             c1_dealt_price = self.dealt_info.get(order.client_oid, None)
             if c1_dealt_price:
-                self.gauge('dealt-diff',
-                           c1_dealt_price / order.average_dealt_price,
+                self.gauge('dealt-diff', c1_dealt_price / order.average_dealt_price,
                            tags={'bs': qb.util.op_bs(order.bs)})
                 self.dealt_info.pop(order.client_oid, None)
 
         if 'deal' in order.status:
             con = 'tick1' if order.contract == self.c1 else 'tick2'
-            self.gauge('dealt',
-                       order.average_dealt_price,
-                       tags={
-                           'bs': order.bs,
-                           'con_symbol': order.contract,
-                           'con': con
-                       })
+            self.gauge('dealt', order.average_dealt_price, tags={'bs': order.bs,
+                                                                 'con_symbol': order.contract,
+                                                                 'con': con})
 
         if order.status in qbxt.model.Order.END_SET and order.contract == self.c1:
             self.active_orders.pop(order.client_oid, None)
         return
 
     async def place_hedge_order(self, bs, amt, c1_dealt_price=None):
-        opt = self.get_options(self.c2, bs=bs, amount=amt, force_maker=False)
+        opt = self.get_options(self.c2, bs=bs, amount=amt,
+                               force_maker=False)
         coid = self.new_coid(self.c2, bs)
         if c1_dealt_price:
             self.dealt_info[coid] = c1_dealt_price
         if bs == 'b':
             with Timer('place-taker-order'):
-                res, err = await self.acc.place_order(self.c2,
-                                                      self.tk2.ask1 * 1.01,
-                                                      bs,
-                                                      amt,
-                                                      client_oid=coid,
+                res, err = await self.acc.place_order(self.c2, self.tk2.ask1 * 1.01, bs, amt, client_oid=coid,
                                                       options=opt)
             if err:
                 logging.warning(err, f'place-taker-b')
                 self.rc_trigger(self.config.cooldown_seconds, 'place-taker')
         elif bs == 's':
             with Timer('place-taker-order'):
-                res, err = await self.acc.place_order(self.c2,
-                                                      self.tk2.bid1 * 0.99,
-                                                      bs,
-                                                      amt,
-                                                      client_oid=coid,
+                res, err = await self.acc.place_order(self.c2, self.tk2.bid1 * 0.99, bs, amt, client_oid=coid,
                                                       options=opt)
             if err:
                 logging.warning(err, f'place-taker-s')
@@ -651,8 +601,7 @@ class Strategy:
                 for data in pos1.data['positions']:
                     self.pos_by_rest[data['contract']] = data
                 try:
-                    pos1_gauge = float(
-                        self.pos_by_rest[self.c1]['total_amount'])
+                    pos1_gauge = float(self.pos_by_rest[self.c1]['total_amount'])
                 except:
                     pos1_gauge = 0
                 self.gauge("pos1", pos1_gauge)
@@ -665,8 +614,7 @@ class Strategy:
                 for data in pos2.data['positions']:
                     self.pos_by_rest[data['contract']] = data
                 try:
-                    pos2_gauge = float(
-                        self.pos_by_rest[self.c2]['total_amount'])
+                    pos2_gauge = float(self.pos_by_rest[self.c2]['total_amount'])
                 except:
                     pos2_gauge = 0
                 self.gauge("pos2", pos2_gauge)
@@ -680,9 +628,7 @@ class Strategy:
             over_due_time = arrow.now().shift(minutes=-30).float_timestamp
             for coid, o in self.active_orders.items():
                 if o.entrust_time < over_due_time:
-                    logging.warning(
-                        f'delete old order {o.bs} , {o.entrust_price}, {o.coid}, {o.eoid}'
-                    )
+                    logging.warning(f'delete old order {o.bs} , {o.entrust_price}, {o.coid}, {o.eoid}')
                     self.active_orders.pop(coid, None)
         with Timer('get-assets'):
             asset, err = await self.acc.get_assets(contract=self.c1)
@@ -690,8 +636,7 @@ class Strategy:
             for data in asset.data['assets']:
                 self.asset_by_rest[data['currency']] = data
             try:
-                total_amount = float(
-                    self.asset_by_rest[self.config.coin]['total_amount'])
+                total_amount = float(self.asset_by_rest[self.config.coin]['total_amount'])
             except:
                 total_amount = 0
             self.gauge('bal', total_amount)
@@ -732,15 +677,13 @@ class Strategy:
     async def match_pos(self):
         is_pos_diff = self.pos_diff()
         if is_pos_diff:
-            self.rc_trigger(
-                20, f'pos diff {self.possum_by_rest()}, {self.possum_by_ws()}')
+            self.rc_trigger(20,
+                            f'pos diff {self.possum_by_rest()}, {self.possum_by_ws()}')
             if await self.keep_pos_unchange(10, 1):
                 self.rc_trigger(self.config.cooldown_seconds, 'pos-mismatch')
-                await qb.alert_push.push_event(
-                    key=f'st-{self.stid}',
-                    level=qb.alert_push.ALERTLEVEL.WARNING,
-                    title=f'{self.stid} pos mismatch',
-                    message=f'{self.stid} pos mismatch @minjieh')
+                await qb.alert_push.push_event(key=f'st-{self.stid}', level=qb.alert_push.ALERTLEVEL.WARNING,
+                                               title=f'{self.stid} pos mismatch',
+                                               message=f'{self.stid} pos mismatch @minjieh')
                 diff_pos = self.possum_by_rest()
                 if diff_pos > 0:
                     bs = 's'
@@ -750,8 +693,7 @@ class Strategy:
                 if diff_pos > self.config.place_amt:
                     diff_pos = self.config.place_amt
                 opt = self.get_options(self.c2, bs, diff_pos, False)
-                logging.info(
-                    f'place mismatch pos order, {bs}, {diff_pos}, {opt}')
+                logging.info(f'place mismatch pos order, {bs}, {diff_pos}, {opt}')
                 await self.place_hedge_order(bs, diff_pos)
 
     async def cancel_old_orders(self):
@@ -767,11 +709,8 @@ class Strategy:
                     self.abnormal_orders[item.exchange_oid] = \
                         self.abnormal_orders.get(item.exchange_oid, 0) + 1
                     if self.abnormal_orders[item.exchange_oid] > 2:
-                        logging.warning(
-                            f'exist abnormal order {item.exchange_oid}, canceling'
-                        )
-                        res, err = await self.acc.cancel_order(
-                            item.exchange_oid)
+                        logging.warning(f'exist abnormal order {item.exchange_oid}, canceling')
+                        res, err = await self.acc.cancel_order(item.exchange_oid)
                     if err:
                         logging.warning(err)
 
@@ -782,12 +721,10 @@ class Strategy:
         if force_maker:
             opt['force_maker'] = True
         if bs == 'b':
-            if float(pos['short_avail_qty']
-                     ) > amount * self.config.open_close_threshold:
+            if float(pos['short_avail_qty']) > amount * self.config.open_close_threshold:
                 open_close = 'close'
         if bs == 's':
-            if float(pos['long_avail_qty']
-                     ) > amount * self.config.open_close_threshold:
+            if float(pos['long_avail_qty']) > amount * self.config.open_close_threshold:
                 open_close = 'close'
         opt[open_close] = True
         return opt
@@ -817,7 +754,7 @@ class Strategy:
         await self.cancel_all()
         await self.config.sync()
         while True:
-            await asyncio.sleep(1)
+            await  asyncio.sleep(1)
             if len(self.ticks) + len(self.bbo) != 2:
                 logging.warning('waiting tick comes')
                 continue
@@ -834,8 +771,8 @@ class Strategy:
 
 
 async def main():
-    s = Strategy(stid='test')
-    await s.init()
+    s = Strategy(stid=stid)
+    await s.run()
 
 
 async def play():
@@ -849,5 +786,18 @@ async def play():
 
 
 if __name__ == '__main__':
-    qb.fut(main())
+    qb.init(env='prod')
+    docopt = docoptinit(__doc__)
+    if docopt['--dry-run']:
+        dryrun = True
+    else:
+        dryrun = False
+    stid = str(docopt['--stid'])
+    logging.info(f'stid: {stid}')
+    logging.info(f'dryrun: {dryrun}')
+    timerInflux = util.InfluxdbUdpGauge(stid, measurement_prefix=True)
+    if docopt['--play']:
+        qb.fut(play())
+    else:
+        qb.fut(main())
     qb.run_forever()
