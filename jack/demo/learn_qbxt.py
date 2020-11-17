@@ -45,7 +45,7 @@ class Strategy:
         return self.cons[1]
 
     async def update_bbo(self, bbo: qbxt.model.BboUpdate):
-        print('update_bbo', bbo)
+        print('update_bbo > boo', bbo.bbo)
         if bbo.bid1 is None:
             logging.warning('bid1 none', bbo.contract, bbo.bid1, bbo.ask1)
             return
@@ -138,7 +138,7 @@ class Strategy:
         return
 
     async def update_tick(self, tk: qbxt.model.OrderbookUpdate):
-        print('update_tick', tk)
+        print('update_tick > bid1', tk.bid1)
         if tk.bid1 is None:
             logging.warning('bid1 none', tk.contract, tk.bid1, tk.ask1)
             return
