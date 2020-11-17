@@ -33,6 +33,8 @@ class Strategy:
         self.pos_by_ws = {}
         self.active_orders: Dict[str, Order] = {}
         self.dealt_info: Dict[str, float] = {}
+        self.bbo_update_q = asyncio.Queue(1)
+        self.ticks: Dict[str, qbxt.model.OrderbookUpdate] = {}
 
     @property
     def c1(self):
@@ -43,6 +45,7 @@ class Strategy:
         return self.cons[1]
 
     async def update_bbo(self, bbo: qbxt.model.BboUpdate):
+        print('update_bbo', bbo)
         if bbo.bid1 is None:
             logging.warning('bid1 none', bbo.contract, bbo.bid1, bbo.ask1)
             return
@@ -58,11 +61,13 @@ class Strategy:
         # now = arrow.now().float_timestamp
         # self.gauge('tk1-delay', (now - self.tk1.exg_time / 1e3) * 1e3)
     async def asset_callback(self, asset: qbxt.model.Assets):
+        print('asset_callback', asset.data['assets'])
         for data in asset.data['assets']:
             self.asset_by_ws[data['currency']] = data
         return
 
     async def order_callback(self, orig: qbxt.model.OrderUpdate):
+        print('order_callback', orig)
         order = orig.order
         if order.contract == self.c1:
             # 如果不在程序肯定有问题
@@ -127,37 +132,61 @@ class Strategy:
         return
 
     async def position_callback(self, pos: qbxt.model.WSPositionUpdate):
+        print('position_callback', pos.data['positions'])
         for data in pos.data['positions']:
             self.pos_by_ws[data['contract']] = data
         return
 
+    async def update_tick(self, tk: qbxt.model.OrderbookUpdate):
+        print('update_tick', tk)
+        if tk.bid1 is None:
+            logging.warning('bid1 none', tk.contract, tk.bid1, tk.ask1)
+            return
+        if tk.ask1 is None:
+            logging.warning('ask1 none', tk.contract, tk.bid1, tk.ask1)
+            return
+        # last_tk = self.ticks.get(tk.contract, None)
+        # if last_tk:
+        #     now = arrow.now().float_timestamp
+            # self.gauge('tk2-interval', (now - self.tk2.recv_time / 1e3) * 1e3)
+        self.ticks[tk.contract] = tk
+
+        # now = arrow.now().float_timestamp
+        # self.gauge('tk2-delay', (now - self.tk2.exg_time / 1e3) * 1e3)
+        # if now - self.tk2.exg_time / 1e3 > self.config.tick_delay_seconds:
+        #     self.rc_trigger(10, 'tk2-delay')
+
+        if not self.bbo_update_q.empty():  # 清空当前q
+            self.bbo_update_q.get_nowait()
+        self.bbo_update_q.put_nowait('update_bbo')
+
     async def init(self):
         self.quote1 = await qbxt.new_quote('okef',
                                            interest_cons=[self.c1],
-                                           use_proxy=False,
+                                           use_proxy=True,
                                            bbo_callback=self.update_bbo)
-        # self.quote2 = await qbxt.new_quote('okef',
-        #                                    interest_cons=[self.c2],
-        #                                    use_proxy=True,
-        #                                    orderbook_callback=self.update_tick)
-        # for con in self.cons:
-        #     self.con_basics[con] = qb.con(con)
-        # await asyncio.sleep(1)
-        # logging.info('quote okef init')
-        #
-        # # cfg = json.loads(Path('~/.onetoken/okef.ot-mom-1-sub128.json').expanduser().read_text())
-        # logging.info(f'using account {self.acc_symbol}')
-        # self.acc = await qbxt.new_account(
-        #     self.acc_symbol,
-        #     # config=cfg,
-        #     use_1token_auth=True,
-        #     use_proxy=True,
-        #     interest_cons=[self.c1, self.c2],
-        #     asset_callback=self.asset_callback,
-        #     position_callback=self.position_callback,
-        #     order_callback=self.order_callback)
-        # await asyncio.sleep(1)
-        # logging.info('account okef init')
+        self.quote2 = await qbxt.new_quote('okef',
+                                           interest_cons=[self.c2],
+                                           use_proxy=True,
+                                           orderbook_callback=self.update_tick)
+        for con in self.cons:
+            self.con_basics[con] = qb.con(con)
+        await asyncio.sleep(1)
+        logging.info('quote okef init')
+
+        # cfg = json.loads(Path('~/.onetoken/okef.ot-mom-1-sub128.json').expanduser().read_text())
+        logging.info(f'using account {self.acc_symbol}')
+        self.acc = await qbxt.new_account(
+            self.acc_symbol,
+            # config=cfg,
+            use_1token_auth=True,
+            use_proxy=True,
+            interest_cons=[self.c1, self.c2],
+            asset_callback=self.asset_callback,
+            position_callback=self.position_callback,
+            order_callback=self.order_callback)
+        await asyncio.sleep(1)
+        logging.info('account okef init')
 
 
 async def main():
