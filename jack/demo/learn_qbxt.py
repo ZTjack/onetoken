@@ -64,13 +64,14 @@ class Strategy:
         # self.gauge('tk1-delay', (now - self.tk1.exg_time / 1e3) * 1e3)
     async def asset_callback(self, asset: qbxt.model.Assets):
         # [{'currency': 'usdt', 'total_amount': 300.0, 'available': 300.0, 'frozen': 0.0}]
-        print('asset_callback', asset.data['assets'])
+        # print('asset_callback', asset.data['assets'])
         for data in asset.data['assets']:
             self.asset_by_ws[data['currency']] = data
         return
 
     async def order_callback(self, orig: qbxt.model.OrderUpdate):
-        print('order_callback->order', orig.order)
+        # {"account": "huobip/subdjw8", "exchange_oid": "huobip/btc.usdt-148405453106144", "client_oid": null, "status": "pending", "contract": "huobip/btc.usdt", "entrust_price": null, "bs": "b", "dealt_amount": 0, "dealt_volume": 0, "entrust_amount": null, "average_dealt_price": null}
+        # print('order_callback->order', orig.order)
         order = orig.order
         if order.contract == self.c1:
             # 如果不在程序肯定有问题
