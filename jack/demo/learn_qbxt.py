@@ -201,8 +201,9 @@ class Strategy:
 
     async def order_callback(self, orig: qbxt.model.OrderUpdate):
         # {"account": "huobip/subdjw8", "exchange_oid": "huobip/btc.usdt-148405453106144", "client_oid": null, "status": "pending", "contract": "huobip/btc.usdt", "entrust_price": null, "bs": "b", "dealt_amount": 0, "dealt_volume": 0, "entrust_amount": null, "average_dealt_price": null}
-        # print('order_callback->order', orig.order)
-        self.gauge('order-update', orig.order)
+        print('order_callback->order', orig.order)
+
+        self.gauge('order-update', 2)
         order = orig.order
         if order.contract == self.c1:
             # 如果不在程序肯定有问题
