@@ -5,6 +5,50 @@ import arrow
 from typing import Dict
 import asyncio
 
+class InfluxdbUdpGauge:
+    def __init__(self, stid, host=None, port=None, measurement_prefix=False):
+        if host is None and port is None:
+            if qb.config.region == 'awstk':
+                host = 'awstk-db-0.machine'
+                port = 8089
+            else:
+                host = 'alihk.influxdb.qbtrade.org'
+                port = 8090
+
+        self.host = host
+        self.port = port
+        self._ls = []
+        if measurement_prefix:
+            self.measurement = f'strategy/{stid}'
+        else:
+            self.measurement = f'{stid}'
+        # self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # self.sock.connect((host, port))
+        # if auto_flush_interval > 0:
+        #     qb.fut(self.auto_flush(auto_flush_interval))
+
+    def add_point(self, key, fields, tags, ts=None):
+        """
+
+        :param key:
+        :param fields:
+        :param tags:
+        :param ts:  time.time() in second
+        :return:
+        """
+
+        influx_udp_client.add_point(self.measurement + '/' + key, fields, tags, ts)
+
+    # def get_line(self, key, fields, tags, ts):
+    #     if tags:
+    #         tag_line = ''.join([f',{key}={value}' for key, value in tags.items()])
+    #     else:
+    #         tag_line = ''
+    #     if not fields:
+    #         # print('ignore', fields)
+    #         return ''
+
+
 
 class Order:
     def __init__(self):
@@ -27,7 +71,7 @@ class Strategy:
     def __init__(self, stid: str):
         self.stid = stid
         self.acc_symbol = 'huobip/subdjw8'
-        self.cons = ['huobip/btc.usdt', 'huobip/bch.usdt']
+        self.cons = ['huobip/link.usdt', 'huobip/bch.usdt']
         self.bbo: Dict[str, qbxt.model.BboUpdate] = {}
         self.asset_by_ws = {}
         self.pos_by_ws = {}
@@ -36,6 +80,7 @@ class Strategy:
         self.bbo_update_q = asyncio.Queue(1)
         self.ticks: Dict[str, qbxt.model.OrderbookUpdate] = {}
         self.con_basics: Dict[str, qb.Contract] = {}
+        self.influxdbudp = InfluxdbUdpGauge(self.stid, measurement_prefix=True)
 
     @property
     def c1(self):
@@ -72,6 +117,7 @@ class Strategy:
     async def order_callback(self, orig: qbxt.model.OrderUpdate):
         # {"account": "huobip/subdjw8", "exchange_oid": "huobip/btc.usdt-148405453106144", "client_oid": null, "status": "pending", "contract": "huobip/btc.usdt", "entrust_price": null, "bs": "b", "dealt_amount": 0, "dealt_volume": 0, "entrust_amount": null, "average_dealt_price": null}
         # print('order_callback->order', orig.order)
+        self.gauge('order-update', orig.order)
         order = orig.order
         if order.contract == self.c1:
             # 如果不在程序肯定有问题
@@ -121,15 +167,15 @@ class Strategy:
                 #            tags={'bs': qb.util.op_bs(order.bs)})
                 self.dealt_info.pop(order.client_oid, None)
 
-        # if 'deal' in order.status:
-        #     con = 'tick1' if order.contract == self.c1 else 'tick2'
-        # self.gauge('dealt',
-        #            order.average_dealt_price,
-        #            tags={
-        #                'bs': order.bs,
-        #                'con_symbol': order.contract,
-        #                'con': con
-        #            })
+        if 'deal' in order.status:
+            con = 'tick1' if order.contract == self.c1 else 'tick2'
+        self.gauge('dealt',
+                   order.average_dealt_price,
+                   tags={
+                       'bs': order.bs,
+                       'con_symbol': order.contract,
+                       'con': con
+                   })
 
         if order.status in qbxt.model.Order.END_SET and order.contract == self.c1:
             self.active_orders.pop(order.client_oid, None)
@@ -164,6 +210,17 @@ class Strategy:
             self.bbo_update_q.get_nowait()
         self.bbo_update_q.put_nowait('update_bbo')
 
+    def gauge(self, key: str, value, tags=None, ts=None):
+        assert self.stid
+        assert tags is None or isinstance(tags, dict)
+        # key = 'strategy/{}/{}'.format(self.stid, key)
+        if tags is None:
+            tags = {}
+        if isinstance(value, dict):
+            self.influxdbudp.add_point(key, value, tags, ts=ts)
+        else:
+            self.influxdbudp.add_point(key, {'value': value}, tags, ts=ts)
+
     async def init(self):
         self.quote1 = await qbxt.new_quote('huobip',
                                            interest_cons=[self.c1],
@@ -194,7 +251,7 @@ class Strategy:
 
 
 async def main():
-    stid = '123'
+    stid = 'st-jack-qbxt-demo'
     s = Strategy(stid=stid)
     await s.init()
 
