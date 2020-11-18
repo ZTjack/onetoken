@@ -4,6 +4,91 @@ import logging
 import arrow
 from typing import Dict
 import asyncio
+import socket
+import time
+
+class InfluxdbGeneralUDP:
+    def __init__(self, host=None, port=None, auto_refresh_interval=0.1):
+
+        if host is None and port is None:
+            if qb.config.region == 'awstk':
+                host = 'awstk-db-0.machine'
+                port = 8089
+            else:
+                host = 'alihk.influxdb.qbtrade.org'
+                port = 8090
+        self.host = host
+        self.port = port
+        self._ls = []
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.connect((host, port))
+        qb.fut(self.auto_flush(auto_refresh_interval))
+
+    def add_point(self, measurement, fields, tags, ts=None):
+        """
+
+        :param measurement:
+        :param fields:
+        :param tags:
+        :param ts: time.time() in second
+        :return:
+        """
+
+        if ts is None:
+            ts = time.time()
+        ts = int(ts * 1e9)
+        line = self.get_line(measurement, fields, tags, ts)
+        if line:
+            self._ls.append(line)
+
+    @staticmethod
+    def get_line(measurement, fields, tags, ts_ns):
+        if tags:
+            tag_line = ''.join([f',{key}={value}' for key, value in tags.items()])
+        else:
+            tag_line = ''
+        if not fields:
+            # print('ignore', fields)
+            return ''
+
+        fields_list = []
+        for k, v in fields.items():
+            if isinstance(v, int):
+                fields_list.append(f'{k}={float(v)}')
+            if isinstance(v, float):
+                fields_list.append(f'{k}={v}')
+        if not fields_list:
+            return ''
+        fields_str = ','.join(fields_list)
+        return f'{measurement}{tag_line} {fields_str} {ts_ns}'
+
+    def flush(self):  # udp by design就不是用来做batch的，可用长度太小。
+        for line in self._ls:
+            self.sock.send(line.encode('utf8'))
+        self._ls.clear()
+
+    async def auto_flush(self, interval):
+        while True:
+            try:
+                await asyncio.sleep(interval)
+            except RuntimeError:
+                print('event loop is closed')
+                break
+            try:
+                a = time.time()
+                length = len(self._ls)
+                self.flush()
+                b = time.time() - a
+                if b * 1000 > 3:  # warn if > 3ms rquired
+                    ms = round(b * 1000, 2)
+                    print(f'long flush use {ms}ms', length)
+            except:
+                logging.exception('unexpected')
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.sock.connect((self.host, self.port))
+
+
+influx_udp_client = InfluxdbGeneralUDP()
 
 class InfluxdbUdpGauge:
     def __init__(self, stid, host=None, port=None, measurement_prefix=False):
