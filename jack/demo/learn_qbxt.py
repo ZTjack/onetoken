@@ -201,7 +201,7 @@ class Strategy:
 
     async def update_bbo(self, bbo: qbxt.model.BboUpdate):
         # {'contract': 'okef/btc.usd.2021-03-26', 'bid1': 17166.3, 'ask1': 17167.08, 'exg_time': 1605607915822.0}
-        # print('update_bbo > boo', bbo.bbo)
+        print('update_bbo > boo', bbo.bbo)
         if bbo.bid1 is None:
             logging.warning('bid1 none', bbo.contract, bbo.bid1, bbo.ask1)
             return
@@ -410,6 +410,7 @@ class Strategy:
         #     return
 
         if bs == 'b':
+            print('self.tk1', self.tk1)
             amt = min(self.tk1.asks[0][1], self.place_amt)
         elif bs == 's':
             amt = min(self.tk1.bids[0][1], self.place_amt)
