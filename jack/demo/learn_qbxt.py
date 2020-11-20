@@ -133,8 +133,6 @@ class InfluxdbUdpGauge:
     #         # print('ignore', fields)
     #         return ''
 
-
-
 class Order:
     def __init__(self):
         self.eoid = None
@@ -159,7 +157,9 @@ class Strategy:
         self.cons = ['huobip/link.usdt', 'huobip/bch.usdt']
         self.bbo: Dict[str, qbxt.model.BboUpdate] = {}
         self.asset_by_ws = {}
+        self.asset_by_rest = {}
         self.pos_by_ws = {}
+        self.pos_by_rest = {}
         self.active_orders: Dict[str, Order] = {}
         self.dealt_info: Dict[str, float] = {}
         self.bbo_update_q = asyncio.Queue(1)
@@ -167,9 +167,18 @@ class Strategy:
         self.con_basics: Dict[str, qb.Contract] = {}
         self.influxdbudp = InfluxdbUdpGauge(self.stid, measurement_prefix=True)
 
+        self.max_pending_orders = 5
+        self.base_amt = 300
+        self.base_coin = 'usdt'
+
+
     @property
     def c1(self):
         return self.cons[0]
+
+    @property
+    def c1_coin(self):
+        return self.c1.split('/')[1].split('.')[0]
 
     @property
     def c2(self):
@@ -307,7 +316,60 @@ class Strategy:
         else:
             self.influxdbudp.add_point(key, {'value': value}, tags, ts=ts)
 
+    async def update_info(self):
+        len_active_orders = len(self.active_orders)
+        if len_active_orders > self.max_pending_orders:
+            over_due_time = arrow.now().shift(minutes=-30).float_timestamp
+            for coid, o in self.active_orders.items():
+                if o.entrust_time < over_due_time:
+                    logging.warning(f'delete old order {o.bs} , {o.entrust_price}, {o.coid}, {o.eoid}')
+                    self.active_orders.pop(coid, None)
+        asset, err = await self.acc.get_assets(contract=self.c1)
+        if not err:
+            for data in asset.data['assets']:
+                self.asset_by_rest[data['currency']] = data
+            try:
+                total_amount = float(self.asset_by_rest[self.base_coin]['total_amount'])
+            except:
+                total_amount = 0
+            self.gauge('position', total_amount)
+            if self.base_amt and self.base_amt > 0:
+                self.gauge('profit-rate', total_amount / self.base_amt)
+        else:
+            # self.rc_trigger(self.config.cooldown_seconds, 'get-assets')
+            logging.warning(err)
+
+        await self.update_pos()
+
+    async def update_pos(self):
+        pos1, err1 = await self.acc.get_positions(self.c1)
+        if not err1:
+            for data in pos1.data['positions']:
+                self.pos_by_rest[data['contract']] = data
+            try:
+                pos1_gauge = float(self.pos_by_rest[self.c1]['total_amount'])
+            except:
+                pos1_gauge = 0
+            self.gauge("pos1", pos1_gauge)
+        else:
+            logging.warning(err1)
+            # self.rc_trigger(self.config.cooldown_seconds, 'get-pos1')
+
+        pos2, err2 = await self.acc.get_positions(self.c2)
+        if not err2:
+            for data in pos2.data['positions']:
+                self.pos_by_rest[data['contract']] = data
+            try:
+                pos2_gauge = float(self.pos_by_rest[self.c2]['total_amount'])
+            except:
+                pos2_gauge = 0
+            self.gauge("pos2", pos2_gauge)
+        else:
+            logging.warning(err2)
+            # self.rc_trigger(self.config.cooldown_seconds, 'get-pos2')
+
     async def init(self):
+        # 行情
         self.quote1 = await qbxt.new_quote('huobip',
                                            interest_cons=[self.c1],
                                            use_proxy=True,
@@ -340,6 +402,8 @@ async def main():
     stid = 'st-jack-qbxt-demo'
     s = Strategy(stid=stid)
     await s.init()
+    await s.update_info()
+    qb.fut(qb.autil.loop_call(s.update_info, 30, panic_on_fail=False))
 
 
 if __name__ == '__main__':
