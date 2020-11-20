@@ -6,6 +6,8 @@ from typing import Dict
 import asyncio
 import socket
 import time
+import string
+import random
 
 class InfluxdbGeneralUDP:
     def __init__(self, host=None, port=None, auto_refresh_interval=0.1):
@@ -171,6 +173,9 @@ class Strategy:
         self.base_amt = 300
         self.base_coin = 'usdt'
 
+        self.last_trade_time = 0
+        self.trade_interval = 0.4
+        self.place_amt = 1
 
     @property
     def c1(self):
@@ -183,6 +188,14 @@ class Strategy:
     @property
     def c2(self):
         return self.cons[1]
+
+    @property
+    def tk1(self) -> qbxt.model.BboUpdate:
+        return self.bbo[self.c1]
+
+    @property
+    def tk2(self) -> qbxt.model.OrderbookUpdate:
+        return self.ticks[self.c2]
 
     async def update_bbo(self, bbo: qbxt.model.BboUpdate):
         # {'contract': 'okef/btc.usd.2021-03-26', 'bid1': 17166.3, 'ask1': 17167.08, 'exg_time': 1605607915822.0}
@@ -210,9 +223,7 @@ class Strategy:
 
     async def order_callback(self, orig: qbxt.model.OrderUpdate):
         # {"account": "huobip/subdjw8", "exchange_oid": "huobip/btc.usdt-148405453106144", "client_oid": null, "status": "pending", "contract": "huobip/btc.usdt", "entrust_price": null, "bs": "b", "dealt_amount": 0, "dealt_volume": 0, "entrust_amount": null, "average_dealt_price": null}
-        print('order_callback->order', orig.order)
-
-        self.gauge('order-update', 2)
+        # print('order_callback->order', orig.order)
         order = orig.order
         if order.contract == self.c1:
             # 如果不在程序肯定有问题
@@ -339,6 +350,51 @@ class Strategy:
             # self.rc_trigger(self.config.cooldown_seconds, 'get-assets')
             logging.warning(err)
 
+    def new_coid(self, con, bs):
+        return con + '-' + f'{bs}ooooo' + ''.join(random.choices(string.ascii_letters, k=10))
+
+    async def do_action(self, bs: str, price: float, amt: float, force_maker: bool):
+        ideal_order_in_active = self.handle_remain_orders(bs, price)
+        if ideal_order_in_active:
+            return
+
+        if len(self.active_orders) > self.max_pending_orders:
+            return
+
+        now = arrow.now().float_timestamp
+        if now - self.last_trade_time < self.trade_interval:
+            return
+        else:
+            self.last_trade_time = now
+        # if await self.rc_work():
+        #     return
+
+        if bs == 'b':
+            amt = min(self.tk1.asks[0][1], self.place_amt)
+        elif bs == 's':
+            amt = min(self.tk1.bids[0][1], self.place_amt)
+
+        coid = self.new_coid(self.c1, bs)
+        o = Order()
+        o.coid = coid
+        o.entrust_price = price
+        o.bs = bs
+        o.entrust_amount = amt
+        o.entrust_time = arrow.now().float_timestamp
+        self.active_orders[coid] = o
+        qb.fut(self.place_maker_order(o))
+
+    async def place_maker_order(self, o: Order):
+        res, err = await self.acc.place_order(self.c1, price=o.entrust_price, bs=o.bs, amount=o.entrust_amount,
+                                   client_oid=o.coid, options=o.opt)
+        if err:
+            # 也有可能下单成功
+            # del self.active_orders[o.coid]
+            # self.rc_trigger(self.config.cooldown_seconds, 'place-maker-order')
+            return
+        if o.coid in self.active_orders.keys():
+            self.active_orders[o.coid].eoid = res.exchange_oid
+
     async def init(self):
         # 行情
         self.quote1 = await qbxt.new_quote('huobip',
@@ -375,6 +431,7 @@ async def main():
     await s.init()
     await s.update_info()
     qb.fut(qb.autil.loop_call(s.update_info, 30, panic_on_fail=False))
+    s.do_action('b', 12, s.place_amt, False)
 
 
 if __name__ == '__main__':
