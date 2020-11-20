@@ -431,7 +431,7 @@ async def main():
     await s.init()
     await s.update_info()
     qb.fut(qb.autil.loop_call(s.update_info, 30, panic_on_fail=False))
-    s.do_action('b', 12, s.place_amt, False)
+    qb.fut(s.do_action('b', 12, s.place_amt, False))
 
 
 if __name__ == '__main__':
