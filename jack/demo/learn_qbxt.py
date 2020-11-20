@@ -201,7 +201,7 @@ class Strategy:
 
     async def update_bbo(self, bbo: qbxt.model.BboUpdate):
         # {'contract': 'huobip/link.usdt', 'bid1': 13.7752, 'ask1': 13.7803, 'ts': 1605860142928.0, 'exg_time': 1605860142928.0}
-        print('update_bbo > boo', bbo.asks)
+        print('update_bbo > boo', bbo)
         if bbo.bid1 is None:
             logging.warning('bid1 none', bbo.contract, bbo.bid1, bbo.ask1)
             return
