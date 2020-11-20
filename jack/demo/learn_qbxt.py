@@ -176,6 +176,8 @@ class Strategy:
         self.last_trade_time = 0
         self.trade_interval = 0.4
         self.place_amt = 1
+        self.cancel_order_interval = 0.4
+        self.max_cancel_times = 5
 
     @property
     def c1(self):
@@ -352,6 +354,44 @@ class Strategy:
 
     def new_coid(self, con, bs):
         return con + '-' + f'{bs}ooooo' + ''.join(random.choices(string.ascii_letters, k=10))
+
+    def handle_remain_orders(self, bs, price):
+        ideal_order_in_active = False
+        for coid, o in list(self.active_orders.items()):
+            if bs != o.bs:
+                continue
+            if price == o.entrust_price and not o.last_cancel_time:
+                ideal_order_in_active = True
+            else:
+                now = arrow.now().float_timestamp
+                if not o.first_cancel_time:
+                    o.first_cancel_time = now
+                factor = self.active_orders[coid].cancel_times + 1
+                if not o.last_cancel_time or now - o.last_cancel_time > self.cancel_order_interval * factor:
+                    if o.eoid:
+                        qb.fut(self.cancel_order(eoid=o.eoid))
+                    else:
+                        qb.fut(self.cancel_order(coid=o.coid))
+                    self.active_orders[coid].last_cancel_time = now
+                    self.active_orders[coid].cancel_times += 1
+                    if self.active_orders[coid].cancel_times > self.max_cancel_times:
+                        logging.warning(f'{o.coid} {o.eoid} cancel times exceed limit')
+                        self.active_orders.pop(o.coid, None)
+
+        return ideal_order_in_active
+
+    async def cancel_order(self, eoid=None, coid=None):
+        if eoid:
+            res, err = await self.acc.cancel_order(exchange_oid=eoid)
+        elif coid:
+            res, err = await self.acc.cancel_order(client_oid=coid)
+        if err:
+            if err.code not in ['exg-okef-32004', qbxt.model.Error.EXG_CANCEL_ORDER_NOT_FOUND]:
+                logging.warning(res, err, eoid, coid)
+            #     if eoid:
+            #         qb.fut(self.cancel_order_after_sleep(eoid=eoid, sleep=10))
+            #     elif coid:
+            #         qb.fut(self.cancel_order_after_sleep(coid=coid, sleep=10))
 
     async def do_action(self, bs: str, price: float, amt: float, force_maker: bool):
         ideal_order_in_active = self.handle_remain_orders(bs, price)
