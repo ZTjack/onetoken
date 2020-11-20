@@ -339,35 +339,6 @@ class Strategy:
             # self.rc_trigger(self.config.cooldown_seconds, 'get-assets')
             logging.warning(err)
 
-        await self.update_pos()
-
-    async def update_pos(self):
-        pos1, err1 = await self.acc.get_positions(self.c1)
-        if not err1:
-            for data in pos1.data['positions']:
-                self.pos_by_rest[data['contract']] = data
-            try:
-                pos1_gauge = float(self.pos_by_rest[self.c1]['total_amount'])
-            except:
-                pos1_gauge = 0
-            self.gauge("pos1", pos1_gauge)
-        else:
-            logging.warning(err1)
-            # self.rc_trigger(self.config.cooldown_seconds, 'get-pos1')
-
-        pos2, err2 = await self.acc.get_positions(self.c2)
-        if not err2:
-            for data in pos2.data['positions']:
-                self.pos_by_rest[data['contract']] = data
-            try:
-                pos2_gauge = float(self.pos_by_rest[self.c2]['total_amount'])
-            except:
-                pos2_gauge = 0
-            self.gauge("pos2", pos2_gauge)
-        else:
-            logging.warning(err2)
-            # self.rc_trigger(self.config.cooldown_seconds, 'get-pos2')
-
     async def init(self):
         # 行情
         self.quote1 = await qbxt.new_quote('huobip',
