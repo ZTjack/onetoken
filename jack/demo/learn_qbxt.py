@@ -410,7 +410,6 @@ class Strategy:
         #     return
 
         if bs == 'b':
-            print('self.tk1', self.tk1)
             amt = min(self.tk1.asks[0][1], self.place_amt)
         elif bs == 's':
             amt = min(self.tk1.bids[0][1], self.place_amt)
