@@ -481,7 +481,7 @@ class Strategy:
 async def main():
     stid = 'st-jack-qbxt-demo'
     s = Strategy(stid=stid)
-    s.get_config_dict()
+    await s.get_config_dict()
 
     # await s.init()
     # await s.update_info()
