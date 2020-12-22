@@ -8,6 +8,7 @@ import socket
 import time
 import string
 import random
+import yaml
 
 class InfluxdbGeneralUDP:
     def __init__(self, host=None, port=None, auto_refresh_interval=0.1):
@@ -437,6 +438,16 @@ class Strategy:
         if o.coid in self.active_orders.keys():
             self.active_orders[o.coid].eoid = res.exchange_oid
 
+    async def get_config_dict(self):
+        print('get redis settings')
+        conn = await qb.util.get_async_redis_conn()
+        yml = await conn.get('strategy:okef-hmj-btc-usd-bq:config.yml')
+        if yml:
+            print(yaml.load(yml))
+            return yaml.load(yml)
+        else:
+            qb.panic('no config found')
+
     async def init(self):
         # 行情
         self.quote1 = await qbxt.new_quote('huobip',
@@ -470,10 +481,12 @@ class Strategy:
 async def main():
     stid = 'st-jack-qbxt-demo'
     s = Strategy(stid=stid)
-    await s.init()
-    await s.update_info()
-    qb.fut(qb.autil.loop_call(s.update_info, 30, panic_on_fail=False))
-    qb.fut(s.do_action('b', 12, s.place_amt, False))
+    s.get_config_dict()
+
+    # await s.init()
+    # await s.update_info()
+    # qb.fut(qb.autil.loop_call(s.update_info, 30, panic_on_fail=False))
+    # qb.fut(s.do_action('b', 12, s.place_amt, False))
 
 
 if __name__ == '__main__':
